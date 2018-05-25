@@ -2,8 +2,10 @@ import tensorflow as tf
 import numpy as np
 import pandas as pd
 import os
+import sys
 from scipy.io import wavfile
 import time
+from datetime import datetime
 
 ###############################################################################
 ############################ Ideas & notes ####################################
@@ -18,26 +20,29 @@ import time
 #       Con: I think there is another option here
 
 # To do:
-    # Get steps and reshaping of data right
+    # Align y_filelist and X_filelist: While there can be multiple types of noise,
+    #       only one underlying label is needed for all of them.
+    #       Thus len(y_filelist) = N*len(X_filelist), N>=0. Fix this!
+    #       Also mind the test files lists!
+    # Get step for Tensorboard logging right!
 
 ###############################################################################
 ############################## Variables ######################################
 ###############################################################################
 
 # Debugging
-DEBUG = 0
+DEBUG = 1
 LOAD_MODEL = 0
 
 # Network
 n_epochs = 31
 n_steps = 960 # 48kHz * 20ms
-n_neurons = 150
 n_input = 1
 n_output = 1
 n_layers = [512, 256, 128, 64]        # n_neurons for each layer
 learning_rate = 0.01
 keep_prob = 0.75
-n_test_files = 5    # Number of test files, rest is training
+n_test_files = 2    # Number of test files, rest is training
 
 # Audio processing variables
 window_length = 20e-3   # 20ms window, usual in speech processing
@@ -52,22 +57,26 @@ overlap = 50    # percent
 X_filelist = []
 y_filelist = []
 filelist_numerator = 0  # since filelists are of the same length only one instance is needed
+file_finished = 1
 
 # Prepare filelists for training and test
 for root, dirs, files in os.walk("./X_data/"):
     for name in files:
         X_filelist.append(os.path.join(root, name))
-        X_test_filelist = X_filelist[:n_test_files]
-        X_filelist = X_filelist[n_test_files:]
+X_test_filelist = X_filelist[:n_test_files]
+X_filelist = X_filelist[n_test_files:]
 for root, dirs, files in os.walk("./y_data/"):
     for name in files:
         y_filelist.append(os.path.join(root, name))
-        y_test_filelist = y_filelist[:n_test_files]
-        y_filelist = y_filelist[n_test_files:]
+y_test_filelist = y_filelist[:n_test_files]
+y_filelist = y_filelist[n_test_files:]
 if len(y_filelist) != len(X_filelist):
+    print("Length of y_filelist:", len(y_filelist), ", Length of X_filelist:", len(X_filelist))
     sys.exit("Error! Mismatch of training data and labels!")
 
 def get_train_data(epoch):
+    global file_finished, filelist_numerator, X_filelist, y_filelist, n_samples
+    global X_data, y_data, framecounter
     # if file is finished, reset framecounter and get next one from list
     if file_finished == 1:
         framecounter = 0
@@ -76,19 +85,19 @@ def get_train_data(epoch):
             filelist_numerator = 0  # reset counter
             epoch += 1  # one epoch done
         file_finished = 0
-        X_fs, X_data = wavfile.read(filelist[-1])
+        X_fs, X_data = wavfile.read(X_filelist[filelist_numerator])
         X_data = X_data/2147483647 # normalization to [-1, +1]
-        y_fs, y_data = wavfile.read(filelist[-1])
+        y_fs, y_data = wavfile.read(y_filelist[filelist_numerator])
         y_data = y_data/2147483647 # normalization to [-1, +1]
         n_samples = X_fs * window_length
 
     # while file isn't finished, get next frame
     # 20ms = 960 samples for Fs = 48e3
-    elif file_finished == 0:
-        X = X_data[framecounter*n_samples:(framecounter+window_length)*n_samples]
-        y = y_data[framecounter*n_samples:(framecounter+window_length)*n_samples]
+    if file_finished == 0:
+        X = X_data[int(framecounter*n_samples):int((framecounter+1)*n_samples)]
+        y = y_data[int(framecounter*n_samples):int((framecounter+1)*n_samples)]
         framecounter += 1
-        if 2*(framecounter+window_length)*n_samples >= len(data):
+        if (framecounter+2)*n_samples >= len(X_data):
             # this leaves out 20ms of the end, but there is silence anyways
             file_finished = 1
 
@@ -112,7 +121,7 @@ logdir = "{}/run-{}/".format(root_logdir, now)
 # Construct Graph
 with tf.name_scope("Input"):
     X = tf.placeholder(dtype=tf.float32, shape=[None, n_steps, n_input], name="X")
-    y = tf.placeholder(dtype=tf.float32, shape=[None, n_output], name="y")
+    y = tf.placeholder(dtype=tf.float32, shape=[None, n_steps, n_output], name="y")
     keep_holder = tf.placeholder(dtype=tf.float32, name="Keep_prob")
 
 
@@ -148,36 +157,36 @@ with tf.Session() as sess:
     else:
         init.run()
     while epoch <= n_epochs:
-        for iteration in range(data.shape[0] - n_steps - 1):
-            X_data, y_data, epoch = get_train_data(epoch)
-            X_data = X_data.reshape((-1, n_steps, n_input))
-            y_data = y_data.reshape((-1, n_output))
-            sess.run(train_op, feed_dict={X: X_data, y: y_data, keep_holder: keep_prob})
+        X_feed_data, y_feed_data, epoch = get_train_data(epoch)
+        X_feed_data = X_feed_data.reshape((-1, n_steps, n_input))
+        y_feed_data = y_feed_data.reshape((-1, n_steps, n_output))
+        sess.run(train_op, feed_dict={X: X_feed_data, y: y_feed_data, keep_holder: keep_prob})
 
-            if iteration%250==0:
-                 summary = loss_summary.eval(feed_dict={X: X_data, y: y_data, keep_holder: keep_prob})
-                 step = iteration + epoch*data.shape[0]
-                 file_writer.add_summary(summary, step)
+        if filelist_numerator%10==0:
+             summary = loss_summary.eval(feed_dict={X: X_feed_data, y: y_feed_data, keep_holder: keep_prob})
+             step = 1
+             file_writer.add_summary(summary, step)
 
-            if DEBUG==1:
-                 # It's messy, I know, but it's quick
-                 mse, outs, ys = sess.run([loss, outputs, y], feed_dict={X: X_data, y: y_data, keep_holder: 1.0})
-                 print("Output:", outs)
-                 print("Y:", ys)
-                 print("Output_shape:", outs.shape, "y_shape:", ys.shape)
-                 print("Epoch:", epoch, "Iteration:", iteration, ", MSE:", mse, flush=True)
-                 input()
+        if DEBUG==1:
+             # It's messy, I know, but it's quick
+             mse, outs, ys = sess.run([loss, outputs, y], feed_dict={X: X_feed_data, y: y_feed_data, keep_holder: 1.0})
+             #print("Outs:", outs)
+             #print("y:", ys)
+             #print("Output_shape:", outs.shape, "y_shape:", ys.shape)
+             print("Epoch:", epoch, ", MSE:", mse, flush=True)
+             #input()
 
 
         # Each epoch calculate & print training and test error
-        mse, outs, ys = sess.run([loss, outputs, y], feed_dict={X: X_data, y: y_data, keep_holder: 1.0})
-        print("Output_shape:", outs.shape, "y_shape:", ys.shape)
-        print("Output:", outs[-1, -1], "Y:", ys[-1])
-        print("Epoch:", epoch, ", MSE:", mse, flush=True)
+        #mse, outs, ys = sess.run([loss, outputs, y], feed_dict={X: X_feed_data, y: y_feed_data, keep_holder: 1.0})
+        #print("Output_shape:", outs.shape, "y_shape:", ys.shape)
+        #print("Output:", outs[-1, -1], "Y:", ys[-1])
+        #print("Epoch:", epoch, ", MSE:", mse, flush=True)
 
         # Save model each 10 epochs
         if epoch%10==0:
             saver.save(sess, "./model/mymodel.ckpt")
+            print("Model saved.", flush=True)
     # Save model after finishing everything
     saver.save(sess, "./model/mymodel.ckpt")
 
