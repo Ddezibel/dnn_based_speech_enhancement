@@ -17,14 +17,15 @@ from datetime import datetime
 #       Con: RNN should pick up time depency on its own
 # - Think about loss, is MSE okay?
 #       Pro: Getting as near as possible to ideal files
-#       Con: I think there is another option here
+#       Con: Definitely not ideal, since silent files would produce a very small
+#            MSE due to normalization!
 
 # To do:
-    # Align y_filelist and X_filelist: While there can be multiple types of noise,
+    # - Align y_filelist and X_filelist: While there can be multiple types of noise,
     #       only one underlying label is needed for all of them.
     #       Thus len(y_filelist) = N*len(X_filelist), N>=0. Fix this!
     #       Also mind the test files lists!
-    # Get step for Tensorboard logging right!
+    # - Get step for Tensorboard logging right!
 
 ###############################################################################
 ############################## Variables ######################################
@@ -33,13 +34,14 @@ from datetime import datetime
 # Debugging
 DEBUG = 1
 LOAD_MODEL = 0
+TEST = 0
 
 # Network
 n_epochs = 31
 n_steps = 960 # 48kHz * 20ms
 n_input = 1
 n_output = 1
-n_layers = [512, 256, 128, 64]        # n_neurons for each layer
+n_layers = [512, 256, 128]        # n_neurons for each layer
 learning_rate = 0.01
 keep_prob = 0.75
 n_test_files = 2    # Number of test files, rest is training
@@ -101,7 +103,7 @@ def get_train_data(epoch):
             # this leaves out 20ms of the end, but there is silence anyways
             file_finished = 1
 
-    return X, y, epoch
+    return X, y, epoch, filelist_numerator
 
 
 ###############################################################################
@@ -157,7 +159,7 @@ with tf.Session() as sess:
     else:
         init.run()
     while epoch <= n_epochs:
-        X_feed_data, y_feed_data, epoch = get_train_data(epoch)
+        X_feed_data, y_feed_data, epoch, filelist_numerator = get_train_data(epoch)
         X_feed_data = X_feed_data.reshape((-1, n_steps, n_input))
         y_feed_data = y_feed_data.reshape((-1, n_steps, n_output))
         sess.run(train_op, feed_dict={X: X_feed_data, y: y_feed_data, keep_holder: keep_prob})
@@ -173,9 +175,25 @@ with tf.Session() as sess:
              #print("Outs:", outs)
              #print("y:", ys)
              #print("Output_shape:", outs.shape, "y_shape:", ys.shape)
-             print("Epoch:", epoch, ", MSE:", mse, flush=True)
+             print("Epoch:", epoch, ", File:", filelist_numerator, ", MSE:", mse, flush=True)
              #input()
 
+        if TEST==1:
+            # get test data
+
+            # calculate test error
+            mse, outs, ys = sess.run([loss, outputs, y], feed_dict={X: X_test_data, y: y_test_data, keep_holder: 1.0})
+            # but also save generated wav files
+            wavefile = []
+            wavefile.append(outs)
+
+            # Messy
+            global X_fs
+            wavefile = wavefile * 2147483647 # rescale
+            i=1
+            filename = './generated/data_%d' % i
+            wavfile.write(filename, X_fs, wavefile)    # save
+            i+=1
 
         # Each epoch calculate & print training and test error
         #mse, outs, ys = sess.run([loss, outputs, y], feed_dict={X: X_feed_data, y: y_feed_data, keep_holder: 1.0})
@@ -184,7 +202,7 @@ with tf.Session() as sess:
         #print("Epoch:", epoch, ", MSE:", mse, flush=True)
 
         # Save model each 10 epochs
-        if epoch%10==0:
+        if filelist_numerator%10==0:
             saver.save(sess, "./model/mymodel.ckpt")
             print("Model saved.", flush=True)
     # Save model after finishing everything
