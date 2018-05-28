@@ -27,6 +27,13 @@ from datetime import datetime
     #       Also mind the test files lists!
     # - Get step for Tensorboard logging right!
 
+# Notes:
+    # - Time for one step, no batching:
+    #        fetching training data: approx. 0ms
+    #       training step of 3 layer model [512, 256, 128]: approx. 1.7s
+    #       training of 4 layer model [512, 256, 128, 64]: approx. 3.2s
+    #       (trained on Nvidia Geforce GTX 960m)
+
 ###############################################################################
 ############################## Variables ######################################
 ###############################################################################
@@ -41,7 +48,7 @@ n_epochs = 31
 n_steps = 960 # 48kHz * 20ms
 n_input = 1
 n_output = 1
-n_layers = [512, 256, 128]        # n_neurons for each layer
+n_layers = [512, 256, 128, 64]        # n_neurons for each layer
 learning_rate = 0.01
 keep_prob = 0.75
 n_test_files = 2    # Number of test files, rest is training
