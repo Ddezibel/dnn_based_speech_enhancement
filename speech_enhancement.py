@@ -11,6 +11,8 @@ from datetime import datetime
 ############################ Ideas & notes ####################################
 ###############################################################################
 
+# Need to debug get_test_data!!!
+
 # - Add spectrum as feature?
 # - Add 50% overlap of speech frames? Usually done in speech processing,
 #       Pro: more training data
@@ -147,6 +149,7 @@ def get_test_data():
         framecounter += 1
         if (framecounter+2)*n_samples >= len(X_test_data):
             # this leaves out 20ms of the end, but there is silence anyways
+            print("Length:", len(X_test_data), "Sample:", framecounter*n_samples, flush=True)
             test_file_finished = 1
 
     return X_test, y_test, epoch, test_filelist_numerator, test_finished, X_test_fs
