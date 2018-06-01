@@ -7,3 +7,6 @@ steadily working on it.
 I'll perform a first run on friday. Next week I'll try to generate first audio files.
 
 I'm kind of busy at the moment, so things are going far slower than I want them to.
+
+
+Update: I'm running a test this weekend. Will upload the generated files next week.
