@@ -72,8 +72,8 @@ X_filelist = []
 y_filelist = []
 X_test_filelist = []
 y_test_filelist = []
-filelist_numerator = 0  # since filelists are of the same length only one instance is needed
-test_filelist_numerator = 0
+filelist_numerator = -1  # since filelists are of the same length only one instance is needed
+test_filelist_numerator = -1
 file_finished = 1
 test_file_finished = 1
 
@@ -99,15 +99,16 @@ def get_train_data(epoch):
     if file_finished == 1:
         framecounter = 0
         filelist_numerator += 1
-        if filelist_numerator >= len(X_filelist)-1: # if filelist is finished
-            filelist_numerator = 0  # reset counter
+        if filelist_numerator >= len(X_filelist): # if filelist is finished
+            filelist_numerator = -1  # reset counter
             epoch += 1  # one epoch done
-        file_finished = 0
-        X_fs, X_data = wavfile.read(X_filelist[filelist_numerator])
-        X_data = X_data/2147483647 # normalization to [-1, +1]
-        y_fs, y_data = wavfile.read(y_filelist[filelist_numerator])
-        y_data = y_data/2147483647 # normalization to [-1, +1]
-        n_samples = X_fs * window_length
+        else:
+            file_finished = 0
+            X_fs, X_data = wavfile.read(X_filelist[filelist_numerator])
+            X_data = X_data/2147483647 # normalization to [-1, +1]
+            y_fs, y_data = wavfile.read(y_filelist[filelist_numerator])
+            y_data = y_data/2147483647 # normalization to [-1, +1]
+            n_samples = X_fs * window_length
 
     # while file isn't finished, get next frame
     # 20ms = 960 samples for Fs = 48e3
@@ -131,25 +132,34 @@ def get_test_data():
     if test_file_finished == 1:
         framecounter = 0
         test_filelist_numerator += 1
-        if test_filelist_numerator > len(X_test_filelist)-1: # if filelist is finished
-            test_filelist_numerator = 0  # reset counter
+        print(test_filelist_numerator)
+        print(len(X_test_filelist))
+        print(X_test_filelist)
+        if test_filelist_numerator >= len(X_test_filelist): # if filelist is finished
+            test_filelist_numerator = -1  # reset counter
             test_finished = 1
-        test_file_finished = 0
-        X_test_fs, X_test_data = wavfile.read(X_test_filelist[test_filelist_numerator])
-        X_test_data = X_test_data/2147483647 # normalization to [-1, +1]
-        y_fs, y_test_data = wavfile.read(y_test_filelist[test_filelist_numerator])
-        y_test_data = y_test_data/2147483647 # normalization to [-1, +1]
-        n_samples = X_test_fs * window_length
+            print("test finished")
+        else:
+            print(X_test_filelist[test_filelist_numerator])
+            X_test_fs, X_test_data = wavfile.read(X_test_filelist[test_filelist_numerator])
+            X_test_data = X_test_data/2147483647 # normalization to [-1, +1]
+            y_test_fs, y_test_data = wavfile.read(y_test_filelist[test_filelist_numerator])
+            y_test_data = y_test_data/2147483647 # normalization to [-1, +1]
+            n_samples = X_test_fs * window_length
+            test_file_finished = 0
+        X_test = 0
+        y_test = 0
 
     # while file isn't finished, get next frame
     # 20ms = 960 samples for Fs = 48e3
-    if test_file_finished == 0:
+    if test_file_finished==0 and test_finished==0:
+        print("framecounter:", framecounter, "length", len(X_test_data), flush=True)
         X_test = X_test_data[int(framecounter*n_samples):int((framecounter+1)*n_samples)]
         y_test = y_test_data[int(framecounter*n_samples):int((framecounter+1)*n_samples)]
         framecounter += 1
         if (framecounter+2)*n_samples >= len(X_test_data):
             # this leaves out 20ms of the end, but there is silence anyways
-            print("Length:", len(X_test_data), "Sample:", framecounter*n_samples, flush=True)
+            print("file finished")
             test_file_finished = 1
 
     return X_test, y_test, epoch, test_filelist_numerator, test_finished, X_test_fs
@@ -206,6 +216,7 @@ step = 1
 old_filelist_numerator = 1
 old_test_filelist_numerator = 1
 old_epoch = 0
+new_epoch = 0
 data_counter = 1
 new_file = 0
 new_test_file = 0
@@ -235,7 +246,10 @@ with tf.Session() as sess:
              summary = loss_summary.eval(feed_dict={X: X_feed_data, y: y_feed_data, keep_holder: keep_prob})
              step += 1
              file_writer.add_summary(summary, step)
+             saver.save(sess, "./model/mymodel.ckpt")
+             print("Model saved.", flush=True)
              new_file = 0
+             #print("Epoch:", epoch, ", File:", filelist_numerator, ", MSE:", mse, flush=True)
 
         if DEBUG==1:
              # It's messy, I know, but it's quick
@@ -246,7 +260,6 @@ with tf.Session() as sess:
              print("Epoch:", epoch, ", File:", filelist_numerator, ", MSE:", mse, flush=True)
              #input()
 
-        new_epoch = 1
 
 ############################### Test ######################################
         # Each epoch run a test and generate data
@@ -254,12 +267,13 @@ with tf.Session() as sess:
             test_finished = 0
             wavefile = 0
             while test_finished == 0:
-                X_test_data, y_test_data, _, test_filelist_numerator, test_finished, X_test_fs = get_test_data()
+                X_test_data_feed, y_test_data_feed, _, test_filelist_numerator, test_finished, X_test_fs = get_test_data()
                 if test_finished == 0:
-                    X_test_data = X_feed_data.reshape((-1, n_steps, n_input))
-                    y_test_data = y_feed_data.reshape((-1, n_steps, n_output))
+                    X_test_data_feed = X_test_data_feed.reshape((-1, n_steps, n_input))
+                    y_test_data_feed = y_test_data_feed.reshape((-1, n_steps, n_output))
                     # calculate test error
-                    mse, outs, ys = sess.run([loss, outputs, y], feed_dict={X: X_test_data, y: y_test_data, keep_holder: 1.0})
+                    mse, outs, ys = sess.run([loss, outputs, y],
+                    feed_dict={X: X_test_data_feed, y: y_test_data_feed, keep_holder: 1.0})
                     # but also save generated wav files
                     wavefile = np.append(wavefile, outs)
 
@@ -276,6 +290,7 @@ with tf.Session() as sess:
                     new_test_file = 0
                     wavefile = 0
             data_counter = 1
+            new_epoch = 0
 
 
         # Save model each N processed files
